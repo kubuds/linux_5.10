@@ -44,9 +44,10 @@ extern void set_power_control_lock(int lock);
 #endif//for AML
 
 #ifdef CONFIG_PLATFORM_CVITEK
+extern int cvi_get_wifi_wakeup_gpio(void);
 extern int cvi_get_wifi_pwr_on_gpio(void);
 extern int cvi_sdio_rescan(void);
-static int cvi_wifi_power_gpio = -1;
+static int cvi_wifi_power_gpio = -1, cvi_wifi_wakeup_gpio = -1;
 #endif //CONFIG_PLATFORM_CVITEK
 
 static int aicbsp_platform_power_on(void);
@@ -470,7 +471,6 @@ static struct sdio_driver aicbsp_sdio_driver = {
 
 static int aicbsp_platform_power_on(void)
 {
-	int wakeup_gpio;
 	int ret = 0;
 	struct semaphore aic_chipup_sem;
 	sdio_dbg("%s\n", __func__);
@@ -501,6 +501,26 @@ static int aicbsp_platform_power_on(void)
 
 #ifdef CONFIG_PLATFORM_CVITEK
 	printk("======== CVITEK WLAN_POWER_ON ========\n");
+
+	cvi_wifi_wakeup_gpio = cvi_get_wifi_wakeup_gpio();
+	if (cvi_get_wifi_wakeup_gpio >= 0) {
+		ret = gpio_request(cvi_wifi_wakeup_gpio, "WLAN_WAKEUP");
+		if (ret < 0) {
+			pr_err("%s: failed to request wakeup GPIO: %d\n",
+			       __func__, ret);
+			cvi_wifi_wakeup_gpio = -1;
+		}
+	}
+
+	if (cvi_wifi_wakeup_gpio >= 0) {
+		ret = gpio_direction_output(cvi_wifi_wakeup_gpio, 1);
+		if (ret) {
+			pr_err("%s: failed to set wakeup GPIO to high: %d\n",
+			       __func__, ret);
+			return ret;
+		}
+	}
+
 	cvi_wifi_power_gpio = cvi_get_wifi_pwr_on_gpio();
 	if (cvi_wifi_power_gpio >= 0) {
 		ret = gpio_request(cvi_wifi_power_gpio, "WLAN_POWER");
@@ -604,12 +624,16 @@ static void aicbsp_platform_power_off(void)
 
 #ifdef CONFIG_PLATFORM_CVITEK
 	printk("======== CVITEK WLAN_POWER_OFF ========\n");
+
 	if (cvi_wifi_power_gpio >= 0) {
 		if(gpio_direction_output(cvi_wifi_power_gpio, 0)) {
 			printk("%s: WLAN_POWER output low failed!\n", __func__);
 		}
 	}
 	gpio_free(cvi_wifi_power_gpio);
+
+	if (cvi_wifi_wakeup_gpio >= 0)
+		gpio_free(cvi_wifi_wakeup_gpio);
 #endif //CONFIG_PLATFORM_CVITEK
 
 	sdio_dbg("%s\n", __func__);
