@@ -153,6 +153,8 @@ static void dwc2_set_hw_id(struct dwc2_hsotg *hsotg, int is_dev)
 }
 #endif
 
+static int sel_role_hdler(struct dwc2_hsotg *hsotg, char const *input);
+
 static int __dwc2_lowlevel_hw_enable(struct dwc2_hsotg *hsotg)
 {
 	struct platform_device *pdev = to_platform_device(hsotg->dev);
@@ -226,7 +228,7 @@ static int __dwc2_lowlevel_hw_enable(struct dwc2_hsotg *hsotg)
 		dev_info(hsotg->dev, "12m clk installed\n");
 	}
 
-	dwc2_set_hw_id(hsotg, hsotg->cviusb.id_override);
+	sel_role_hdler(hsotg, "host");
 #endif
 
 	if (hsotg->uphy) {
@@ -436,13 +438,23 @@ static int proc_role_show(struct seq_file *m, void *v)
 	return 0;
 }
 
+static void cviusb_adjust_gpio(struct cviusb_dev *cviusb, int is_host)
+{
+	if (cviusb->host_en_pin)
+		gpio_direction_output(cviusb->host_en_pin,
+				      !!(is_host ^ cviusb->host_en_inverted));
+	if (cviusb->vbus_en_pin)
+		gpio_direction_output(cviusb->vbus_en_pin,
+				      !!(is_host ^ cviusb->vbus_en_inverted));
+}
+
 static int sel_role_hdler(struct dwc2_hsotg *hsotg, char const *input)
 {
 	u32 num;
 	u8 str[80] = {0};
 	u8 t = 0;
 	u8 i, n;
-	u8 *p;
+	u8 *p, is_host;
 
 	num = sscanf(input, "%s", str);
 	if (num > 1) {
@@ -465,6 +477,9 @@ static int sel_role_hdler(struct dwc2_hsotg *hsotg, char const *input)
 
 	hsotg->cviusb.id_override = t;
 	dwc2_set_hw_id(hsotg, t);
+
+	is_host = !strcmp(str, "host");
+	cviusb_adjust_gpio(&hsotg->cviusb, is_host);
 
 	return 0;
 }
@@ -1384,6 +1399,34 @@ static int dwc2_driver_probe(struct platform_device *dev)
 			hsotg->cviusb.vbus_pin = -EINVAL;
 			dev_err(hsotg->dev, "request gpio fail!\n");
 		}
+	}
+
+	hsotg->cviusb.vbus_en_pin = of_get_named_gpio_flags(dev->dev.of_node,
+				"vbus-en-gpio", 0, &flags);
+	if (gpio_is_valid(hsotg->cviusb.vbus_en_pin)) {
+		hsotg->cviusb.vbus_en_inverted = flags & OF_GPIO_ACTIVE_LOW ?
+					1 : 0;
+		if (devm_gpio_request(&dev->dev, hsotg->cviusb.vbus_en_pin,
+				      "cviusb-vbus-en"))
+			hsotg->cviusb.vbus_en_pin = -EINVAL;
+
+		pr_info("USB VBUS_EN pin = %d, inverted = %s\n",
+			hsotg->cviusb.vbus_en_pin,
+			hsotg->cviusb.vbus_en_inverted ? "yes" : "no");
+	}
+
+	hsotg->cviusb.host_en_pin = of_get_named_gpio_flags(dev->dev.of_node,
+				"host-en-gpio", 0, &flags);
+	if (gpio_is_valid(hsotg->cviusb.host_en_pin)) {
+		hsotg->cviusb.host_en_inverted = flags & OF_GPIO_ACTIVE_LOW ?
+					1 : 0;
+		if (devm_gpio_request(&dev->dev, hsotg->cviusb.host_en_pin,
+				      "cviusb-host-en"))
+			hsotg->cviusb.host_en_pin = -EINVAL;
+
+		pr_info("USB HOST_EN pin = %d, inverted = %s\n",
+			hsotg->cviusb.host_en_pin,
+			hsotg->cviusb.host_en_inverted ? "yes" : "no");
 	}
 
 #ifdef CONFIG_PROC_FS

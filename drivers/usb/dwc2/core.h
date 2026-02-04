@@ -872,6 +872,10 @@ struct cviusb_dev {
 	struct cvi_usb_clk	clk_12m;
 	int			vbus_pin;
 	int			vbus_pin_inverted;
+	int			vbus_en_pin;
+	int			vbus_en_inverted;
+	int			host_en_pin;
+	int			host_en_inverted;
 	int			pre_vbus_status;
 	int			id_override;
 	u8			dcd_dis;
